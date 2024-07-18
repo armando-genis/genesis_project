@@ -1,0 +1,225 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="genesis_robot">
+
+    <xacro:property name="M_PI" value="3.14159274"/>
+
+    <xacro:property name="tire_dia" value="0.350"/>  <!-- Reduced from 0.440 -->
+    <xacro:property name="tire_width" value="0.195"/>  <!-- Reduced from 0.195 -->
+    <xacro:property name="hub_dia" value="0.235"/>  <!-- Reduced from 0.235 -->
+
+    <xacro:property name="hex_hub_depth" value="0.120"/> <!-- or +0.072 -->  
+    <xacro:property name="wheel_mass" value="8.0"/>   <!-- check -->
+
+    <!-- Materials -->
+    <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+    </material>
+    <material name="white">
+        <color rgba="1.0 1.0 1.0 1.0"/>
+    </material>
+    <material name="black">
+        <color rgba="0 0 0 1.0"/>
+    </material>
+
+
+
+    <!-- Base Link -->
+    <link name="base_footprint"/>
+
+    <joint name="base_link_joint" type="fixed">
+        <origin xyz="0 0 0"/>
+        <parent link="base_footprint"/>
+        <child link="base_link"/>
+    </joint>
+
+    <link name="base_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.0 1.2 0.2"/> <!-- Box of size 2.0m x 1.2m x 0.2m -->
+            </geometry>
+            <material name="gray"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="2.0 1.2 0.2"/> <!-- Box of size 2.0m x 1.2m x 0.2m -->
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="125.0" />
+            <origin xyz="0 0 0" />
+            <inertia  ixx="1.391" ixy="0.004"  ixz="0.0"  iyy="6.853"  iyz="0.0"  izz="6.125" />
+        </inertial>
+    </link>
+
+    <xacro:macro name="null_inertial">
+        <inertial>
+            <mass value="4.5"/>
+            <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+        </inertial>
+    </xacro:macro>
+
+  <xacro:macro name="thick_walled_tube_inertial"
+               params="inner_rad outer_rad height mass">
+    <inertial>
+      <mass value="${mass}"/>
+      <inertia ixx="${(1 / 12) * mass * (3 * (inner_rad * inner_rad +
+                    outer_rad * outer_rad) + height * height)}"
+               ixy="0" ixz="0"
+               iyy="${(1 / 12) * mass * (3 * (inner_rad * inner_rad +
+                    outer_rad * outer_rad) + height * height)}"
+               iyz="0"
+               izz="${mass * (inner_rad * inner_rad +
+                    outer_rad * outer_rad) / 2}"/>
+    </inertial>
+  </xacro:macro>
+
+    <!-- Suspension Macro -->
+    <xacro:macro name="steering_v0" params="prefix parent *joint_origin *joint_axis">
+        <joint name="${prefix}_steering_joint" type="revolute">
+            <xacro:insert_block name="joint_origin"/>
+            <parent link="${parent}"/>
+            <child link="${prefix}_steering_link"/>
+            <limit effort="50" velocity="25" lower="-2.1" upper="2.1" />
+            <xacro:insert_block name="joint_axis"/>
+        </joint>
+
+        <link name="${prefix}_steering_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <cylinder length="0.1" radius="0.05"/>
+                </geometry>
+                <material name="gray"/>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <cylinder length="0.1" radius="0.05"/>
+                </geometry>
+            </collision>
+            <!-- <inertial>
+                <origin xyz="0 0 -0.02"/>
+                <mass value="0.15"/>
+                <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.000004" />
+            </inertial> -->
+            <xacro:null_inertial/>
+        </link>
+    </xacro:macro>
+
+    <!-- Wheel Macro -->
+    <xacro:macro name="wheel_v0" params="prefix parent *joint_origin *joint_axis">
+        <joint name="${prefix}_wheel_joint" type="continuous">
+            <xacro:insert_block name="joint_origin"/>
+            <parent link="${parent}"/>
+            <child link="${prefix}_wheel_link"/>
+            <limit effort="1.5" velocity="20"/>
+            <xacro:insert_block name="joint_axis"/>
+        </joint>
+
+        <link name="${prefix}_wheel_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+                <geometry>
+                    <cylinder length="0.25" radius="0.3"/> <!-- Wheel of radius 0.3m -->
+                </geometry>
+                <material name="black"/>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+                <geometry>
+                    <cylinder length="0.25" radius="0.3"/> <!-- Wheel of radius 0.3m -->
+                </geometry>
+            </collision>
+            <!-- <inertial>
+                <origin xyz="0 0 0"/>
+                <mass value="1.0"/>
+                <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+            </inertial> -->
+            <xacro:thick_walled_tube_inertial
+                inner_rad="${hub_dia / 2}" outer_rad="${tire_dia / 2}"
+                height="${tire_width}" mass="${wheel_mass}"/>
+        </link>
+    </xacro:macro>
+
+    <!-- Front Right Suspension -->
+    <xacro:steering_v0 prefix="fr" parent="base_link">
+        <origin xyz="1.0 -0.6 0"/>
+        <axis xyz="0 0 1"/>
+    </xacro:steering_v0>
+    <xacro:wheel_v0 prefix="fr" parent="fr_steering_link">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+    </xacro:wheel_v0>
+
+    <!-- Front Left Suspension -->
+    <xacro:steering_v0 prefix="fl" parent="base_link">
+        <origin xyz="1.0 0.6 0"/>
+        <axis xyz="0 0 1"/>
+    </xacro:steering_v0>
+    <xacro:wheel_v0 prefix="fl" parent="fl_steering_link">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+    </xacro:wheel_v0>
+
+    <!-- Rear Right Wheel -->
+    <xacro:wheel_v0 prefix="rr" parent="base_link">
+        <origin xyz="-1.0 -0.6 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+    </xacro:wheel_v0>
+
+    <!-- Rear Left Wheel -->
+    <xacro:wheel_v0 prefix="rl" parent="base_link">
+        <origin xyz="-1.0 0.6 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+    </xacro:wheel_v0>
+
+    <!-- Gazebo Plugin for Ackermann Drive -->
+    <gazebo>
+        <plugin name="gazebo_ros_ackermann_drive" filename="libgazebo_ros_ackermann_drive.so">
+            <ros>
+                <remapping>cmd_vel:=cmd_vel</remapping>
+                <remapping>odom:=odom</remapping>
+            </ros>
+            <update_rate>100.0</update_rate>
+
+            <!-- wheels -->
+            <front_left_joint>fl_wheel_joint</front_left_joint>
+            <front_right_joint>fr_wheel_joint</front_right_joint>
+            <rear_left_joint>rl_wheel_joint</rear_left_joint>
+            <rear_right_joint>rr_wheel_joint</rear_right_joint>
+
+            <!-- steering -->
+            <left_steering_joint>fl_steering_joint</left_steering_joint>
+            <right_steering_joint>fr_steering_joint</right_steering_joint>
+
+            <!-- Max absolute steer angle for tyre in radians-->
+            <!-- Any cmd_vel angular z greater than this would be capped -->
+            <max_steer>1.01</max_steer>
+
+            <!-- Max absolute steering angle of steering wheel -->
+            <max_steering_angle>6.85</max_steering_angle>
+
+            <!-- Max absolute linear speed in m/s -->
+            <max_speed>20</max_speed>
+
+            <!-- PID tuning -->
+            <left_steering_pid_gain>1500 0 1</left_steering_pid_gain>
+            <left_steering_i_range>0 0</left_steering_i_range>
+            <right_steering_pid_gain>1500 0 1</right_steering_pid_gain>
+            <right_steering_i_range>0 0</right_steering_i_range>
+            <linear_velocity_pid_gain>1000 0 1</linear_velocity_pid_gain>
+            <linear_velocity_i_range>0 0</linear_velocity_i_range>
+
+            <!-- output -->
+            <publish_odom>true</publish_odom>
+            <publish_odom_tf>true</publish_odom_tf>
+            <publish_wheel_tf>true</publish_wheel_tf>
+            <publish_distance>false</publish_distance>
+
+            <odometry_frame>odom</odometry_frame>
+            <robot_base_frame>base_footprint</robot_base_frame>
+        </plugin>
+    </gazebo>
+</robot>
