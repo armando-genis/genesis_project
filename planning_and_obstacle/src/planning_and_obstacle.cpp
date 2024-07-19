@@ -49,6 +49,7 @@ private:
     // Collision checker
     fop::SATCollisionChecker collision_checker; 
     bool collision_detected = false;
+    std::vector<bool> collision_vector;
     // Vehicle parameters
     static constexpr double car_width = 2.0;
     static constexpr double car_length = 4.0;
@@ -94,6 +95,7 @@ private:
     void processAndVisualize();
     void gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     bool checkCollisionAtStart(const PathOptimizationNS::State state);
+    geometry_msgs::msg::Polygon createObstaclePolygon(double x, double y);
 
 
 public:
@@ -264,7 +266,14 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     marker.color.b = 0.0;
     marker_pub_->publish(marker);
 
-    checkCollisionAtStart(start_state);
+    bool data = checkCollisionAtStart(start_state);
+    if (data) {
+        RCLCPP_INFO(this->get_logger(), "\033[1;31m----> Collision detected at start state.\033[0m");
+
+    } 
+    else {
+        RCLCPP_INFO(this->get_logger(), "\033[1;32m----> No collision detected at start state.\033[0m");
+    }
 
     RCLCPP_INFO(this->get_logger(), "Received initial state");
 }
@@ -317,7 +326,7 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
 
 void planning_and_obstacle::processAndVisualize()
 {
-    RCLCPP_INFO(this->get_logger(), "Start state received: %d, End state received: %d", start_state_rcv, end_state_rcv);
+    // RCLCPP_INFO(this->get_logger(), "Start state received: %d, End state received: %d", start_state_rcv, end_state_rcv);
 
 
     if (!start_state_rcv || !end_state_rcv ) {
@@ -404,13 +413,28 @@ void planning_and_obstacle::processAndVisualize()
 bool planning_and_obstacle::checkCollisionAtStart(const PathOptimizationNS::State state)
 {
 
+    // Define the 5 meter offset
+    double offset = 5.0;
+
+    // Define the bounds for the region to check
+    double min_x = std::max(originX, state.x - offset);
+    double max_x = std::min(originX + width * resolution, state.x + offset);
+    double min_y = std::max(originY, state.y - offset);
+    double max_y = std::min(originY + height * resolution, state.y + offset);
+
+    // Convert bounds to grid indices
+    uint32_t min_i = std::max(0, static_cast<int>((min_y - originY) / resolution));
+    uint32_t max_i = std::min(static_cast<int>(height) - 1, static_cast<int>((max_y - originY) / resolution));
+    uint32_t min_j = std::max(0, static_cast<int>((min_x - originX) / resolution));
+    uint32_t max_j = std::min(static_cast<int>(width) - 1, static_cast<int>((max_x - originX) / resolution));
+
     // Publish the vehicle geometry as a polygon
     visualization_msgs::msg::Marker polygon_marker;
     polygon_marker.header.frame_id = "map";
     polygon_marker.header.stamp = this->now();
     polygon_marker.ns = "vehicle_polygon";
     polygon_marker.action = visualization_msgs::msg::Marker::ADD;
-    polygon_marker.id = 2;
+    polygon_marker.id = 10;
     polygon_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
     polygon_marker.scale.x = 0.05;
     polygon_marker.color.a = 1.0;
@@ -438,8 +462,61 @@ bool planning_and_obstacle::checkCollisionAtStart(const PathOptimizationNS::Stat
 
     polygon_pub_->publish(polygon_marker);
 
+    // for (uint32_t i = 0; i < height; ++i) {
+    //     for (uint32_t j = 0; j < width; ++j) {
+    //         double x = originX + j * resolution;
+    //         double y = originY + i * resolution;
+    //         if (x >= min_x && x <= max_x && y >= min_y && y <= max_y) {
+    //             if (occ_map_data_.data[i * width + j] > 0) {
+    //                 auto obstacle_poly = createObstaclePolygon(x, y);
+    //                 if (collision_checker.check_collision(vehicle_poly, obstacle_poly)) {
+    //                     return true; // Collision detected
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+    // return false;
 
+    // Check each relevant cell in the occupancy grid
+    for (uint32_t i = min_i; i <= max_i; ++i) {
+        for (uint32_t j = min_j; j <= max_j; ++j) {
+            if (occ_map_data_.data[i * width + j] > 0) {
+                double x = originX + j * resolution;
+                double y = originY + i * resolution;
+                auto obstacle_poly = createObstaclePolygon(x, y);
 
+                if (collision_checker.check_collision(vehicle_poly, obstacle_poly)) {
+                    return true; // Collision detected
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+geometry_msgs::msg::Polygon planning_and_obstacle::createObstaclePolygon(double x, double y) {
+    geometry_msgs::msg::Polygon obstacle_poly;
+    double half_res = resolution / 2.0;
+
+    geometry_msgs::msg::Point32 p1, p2, p3, p4;
+    p1.x = x - half_res;
+    p1.y = y - half_res;
+    p2.x = x + half_res;
+    p2.y = y - half_res;
+    p3.x = x + half_res;
+    p3.y = y + half_res;
+    p4.x = x - half_res;
+    p4.y = y + half_res;
+
+    obstacle_poly.points.push_back(p1);
+    obstacle_poly.points.push_back(p2);
+    obstacle_poly.points.push_back(p3);
+    obstacle_poly.points.push_back(p4);
+    obstacle_poly.points.push_back(p1); // Close the polygon
+
+    return obstacle_poly;
 }
 
 void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
@@ -452,10 +529,10 @@ void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::Shar
     height = occ_map_data_.info.height;
 
     // log the resolution, origin and size of the map
-    RCLCPP_INFO(this->get_logger(), "Resolution: %f", resolution);
-    RCLCPP_INFO(this->get_logger(), "Origin: (%f, %f)", originX, originY);
-    RCLCPP_INFO(this->get_logger(), "Size: %d x %d", width, height);
-    RCLCPP_INFO(this->get_logger(), "Occupancy grid map received");
+    // RCLCPP_INFO(this->get_logger(), "Resolution: %f", resolution);
+    // RCLCPP_INFO(this->get_logger(), "Origin: (%f, %f)", originX, originY);
+    // RCLCPP_INFO(this->get_logger(), "Size: %d x %d", width, height);
+    // RCLCPP_INFO(this->get_logger(), "Occupancy grid map received");
 }
 
 int main(int argc, char** argv) {
