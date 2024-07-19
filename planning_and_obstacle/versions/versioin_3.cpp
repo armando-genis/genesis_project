@@ -93,7 +93,7 @@ private:
     void goalCb(const geometry_msgs::msg::PoseStamped::SharedPtr goal);
     void processAndVisualize();
     void gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-    bool checkCollisionAtStart(const PathOptimizationNS::State state);
+    bool checkCollisionAtStart();
 
 
 public:
@@ -264,8 +264,6 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     marker.color.b = 0.0;
     marker_pub_->publish(marker);
 
-    checkCollisionAtStart(start_state);
-
     RCLCPP_INFO(this->get_logger(), "Received initial state");
 }
 
@@ -310,14 +308,36 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     marker.color.b = 0.0;
     marker_pub_->publish(marker);
 
-    checkCollisionAtStart(end_state);
-
     RCLCPP_INFO(this->get_logger(), "Received goal state");
 }
 
 void planning_and_obstacle::processAndVisualize()
 {
     RCLCPP_INFO(this->get_logger(), "Start state received: %d, End state received: %d", start_state_rcv, end_state_rcv);
+    // Publish the vehicle geometry as a polygon
+    visualization_msgs::msg::Marker polygon_marker;
+    polygon_marker.header.frame_id = "map";
+    polygon_marker.header.stamp = this->now();
+    polygon_marker.ns = "vehicle_polygon";
+    polygon_marker.action = visualization_msgs::msg::Marker::ADD;
+    polygon_marker.id = 2;
+    polygon_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    polygon_marker.scale.x = 0.05;
+    polygon_marker.color.a = 1.0;
+    polygon_marker.color.r = 0.0;
+    polygon_marker.color.g = 1.0;
+    polygon_marker.color.b = 0.0;
+
+    for (const auto& point : vehicle_geometry.points) {
+        geometry_msgs::msg::Point p;
+        p.x = point.x;
+        p.y = point.y;
+        p.z = 0.1;
+        polygon_marker.points.push_back(p);
+    }
+
+    polygon_pub_->publish(polygon_marker);
+
 
 
     if (!start_state_rcv || !end_state_rcv ) {
@@ -401,44 +421,19 @@ void planning_and_obstacle::processAndVisualize()
 
 }
 
-bool planning_and_obstacle::checkCollisionAtStart(const PathOptimizationNS::State state)
+bool planning_and_obstacle::checkCollisionAtStart()
 {
-
-    // Publish the vehicle geometry as a polygon
-    visualization_msgs::msg::Marker polygon_marker;
-    polygon_marker.header.frame_id = "map";
-    polygon_marker.header.stamp = this->now();
-    polygon_marker.ns = "vehicle_polygon";
-    polygon_marker.action = visualization_msgs::msg::Marker::ADD;
-    polygon_marker.id = 2;
-    polygon_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    polygon_marker.scale.x = 0.05;
-    polygon_marker.color.a = 1.0;
-    polygon_marker.color.r = 0.0;
-    polygon_marker.color.g = 1.0;
-    polygon_marker.color.b = 0.0;
-
     // Create the vehicle polygon at the start state position
     geometry_msgs::msg::Polygon vehicle_poly;
     for (const auto& point : vehicle_geometry.points) {
-        geometry_msgs::msg::Point32 p_point32;
-        geometry_msgs::msg::Point p_point;
-
-        double x = state.x + point.x * cos(state.z) - point.y * sin(state.z);
-        double y = state.y + point.x * sin(state.z) + point.y * cos(state.z);
-
-        p_point32.x = x;
-        p_point32.y = y;
-        p_point.x = x;
-        p_point.y = y;
-
-        polygon_marker.points.push_back(p_point);
-        vehicle_poly.points.push_back(p_point32);
+        geometry_msgs::msg::Point32 p;
+        p.x = start_state.x + point.x * cos(start_state.z) - point.y * sin(start_state.z);
+        p.y = start_state.y + point.x * sin(start_state.z) + point.y * cos(start_state.z);
+        vehicle_poly.points.push_back(p);
     }
 
-    polygon_pub_->publish(polygon_marker);
 
-
+    
 
 }
 

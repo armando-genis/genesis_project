@@ -13,7 +13,7 @@ public:
     : Node("grid_map_publisher")
   {
     // Initialize grid map from image.
-    std::string image_dir = "/home/genis/ros2_ws/src/sim/grid_map_publisher";
+    std::string image_dir = "/home/genis/ros2_ws/src/genesis_project/grid_map_publisher";
     std::string image_file = "gridmap.png";
     image_dir.append("/" + image_file);
     cv::Mat img_src = cv::imread(image_dir, CV_8UC1);

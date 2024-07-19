@@ -13,6 +13,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+
+
 
 
 
@@ -33,7 +36,7 @@ endif()
 
 add_executable(optimal_planner_node src/planning_and_obstacle.cpp src/CubicSpline1D.cpp src/sat_collision_checker.cc)
 
-ament_target_dependencies(optimal_planner_node rclcpp std_msgs geometry_msgs visualization_msgs tf2 tf2_geometry_msgs)
+ament_target_dependencies(optimal_planner_node rclcpp std_msgs geometry_msgs visualization_msgs tf2 tf2_geometry_msgs nav_msgs)
 target_link_libraries(optimal_planner_node Eigen3::Eigen)
 
 
