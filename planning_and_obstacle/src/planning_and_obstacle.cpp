@@ -16,35 +16,9 @@
 // Assuming the correct include for SATCollisionChecker
 #include "sat_collision_checker.h" // Ensure this include is correct
 #include "rrt_planner.h" // Include RRT Planner
+#include "PathOptimizationNS.h" // Include PathOptimizationNS
+#include "HeuristicsController.h" // Include HeuristicsController
 
-namespace PathOptimizationNS {
-
-// Standard point struct.
-struct State {
-    State() = default;
-    State(double x, double y, double z = 0, double k = 0, double s = 0, double v = 0, double a = 0) :
-        x(x), y(y), z(z), k(k), s(s), v(v), a(a) {}
-    double x{};
-    double y{};
-    double z{}; // Heading.
-    double k{}; // Curvature.
-    double s{};
-    double v{};
-    double a{};
-};
-
-State local2Global(const State &reference, const State &target) {
-    double x = target.x * cos(reference.z) - target.y * sin(reference.z) + reference.x;
-    double y = target.x * sin(reference.z) + target.y * cos(reference.z) + reference.y;
-    double z = reference.z + target.z;
-    return {x, y, z, target.k, target.s};
-}
-
-double distance(const PathOptimizationNS::State &p1, const PathOptimizationNS::State &p2) {
-    return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
-}
-
-} // namespace PathOptimizationNS
 
 class planning_and_obstacle : public rclcpp::Node
 {
@@ -59,7 +33,6 @@ private:
     static constexpr double rtc = 1.5;
     static constexpr double rear_d = car_length / 2 - rtc;
     static constexpr double front_d = car_length - rear_d;
-
 
     // Occupancy Grid Map
     nav_msgs::msg::OccupancyGrid occ_map_data_;
@@ -81,6 +54,9 @@ private:
     PathOptimizationNS::State start_state, end_state;
     std::vector<PathOptimizationNS::State> reference_path;
     bool start_state_rcv = false, end_state_rcv = false, reference_rcv = false;
+
+    // Heuristics Controller
+    std::unique_ptr<HeuristicsController> heuristics_controller_;
 
     // Publishers
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
@@ -391,7 +367,7 @@ void planning_and_obstacle::processAndVisualize()
     if (reference_path.size() >= 2) {
         const auto &p1 = reference_path[reference_path.size() - 2];
         const auto &p2 = reference_path.back();
-        if (distance(p1, p2) <= 0.001) {
+        if (PathOptimizationNS::distance(p1, p2) <= 0.001) {
             reference_path.clear();
             reference_rcv = false;
         }
@@ -586,6 +562,13 @@ void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::Shar
 
     rrt_planner_.initialize(originX, originY, resolution, width, height);
     rrt_planner_.setOccupancyGrid(occ_map_data_);
+
+    heuristics_controller_ = std::make_unique<HeuristicsController>(resolution, originX, originY, width, height, occ_map_data_.data);
+
+    PathOptimizationNS::State targetCellPos; // Define the target state as needed
+    heuristics_controller_->EuclideanDistance(targetCellPos);
+    heuristics_controller_->DynamicProgramming(targetCellPos);
+    heuristics_controller_->GenerateFinalHeuristics(occ_map_data_.data);
 
 
     // log the resolution, origin and size of the map
