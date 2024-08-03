@@ -15,35 +15,8 @@
 
 // Assuming the correct include for SATCollisionChecker
 #include "sat_collision_checker.h" // Ensure this include is correct
-
-namespace PathOptimizationNS {
-
-// Standard point struct.
-struct State {
-    State() = default;
-    State(double x, double y, double z = 0, double k = 0, double s = 0, double v = 0, double a = 0) :
-        x(x), y(y), z(z), k(k), s(s), v(v), a(a) {}
-    double x{};
-    double y{};
-    double z{}; // Heading.
-    double k{}; // Curvature.
-    double s{};
-    double v{};
-    double a{};
-};
-
-State local2Global(const State &reference, const State &target) {
-    double x = target.x * cos(reference.z) - target.y * sin(reference.z) + reference.x;
-    double y = target.x * sin(reference.z) + target.y * cos(reference.z) + reference.y;
-    double z = reference.z + target.z;
-    return {x, y, z, target.k, target.s};
-}
-
-double distance(const PathOptimizationNS::State &p1, const PathOptimizationNS::State &p2) {
-    return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2));
-}
-
-} // namespace PathOptimizationNS
+#include "rrt_planner.h" // Include RRT Planner
+#include "PathOptimizationNS.h" // Include PathOptimizationNS
 
 class planning_and_obstacle : public rclcpp::Node
 {
@@ -59,7 +32,6 @@ private:
     static constexpr double rear_d = car_length / 2 - rtc;
     static constexpr double front_d = car_length - rear_d;
 
-
     // Occupancy Grid Map
     nav_msgs::msg::OccupancyGrid occ_map_data_;
     double resolution;
@@ -70,12 +42,17 @@ private:
 
     // Vehicle geometry
     geometry_msgs::msg::Polygon vehicle_geometry;
-    
+
+    // RRT Planner
+    RRTPlanner rrt_planner_;    
+    geometry_msgs::msg::PoseStamped start_pose_rtt;
+    geometry_msgs::msg::PoseStamped goal_pose_rtt;
 
     // States
     PathOptimizationNS::State start_state, end_state;
     std::vector<PathOptimizationNS::State> reference_path;
     bool start_state_rcv = false, end_state_rcv = false, reference_rcv = false;
+
 
     // Publishers
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
@@ -98,6 +75,9 @@ private:
     void gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
     bool checkCollisionAtStart(const PathOptimizationNS::State state, const std::string& hex_color );
     geometry_msgs::msg::Polygon createObstaclePolygon(double x, double y);
+    int getGridValue(double x, double y);
+    void handleRRTPathPlanning(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal);
+    void visualizePath(const std::vector<geometry_msgs::msg::PoseStamped> &path);
 
 
 public:
@@ -243,10 +223,6 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     m.getRPY(roll, pitch, yaw);
     start_state.z = yaw;
 
-    if (reference_rcv) {
-        start_state_rcv = true;
-    }
-
     // Create a marker for RViz
     visualization_msgs::msg::Marker marker;
     marker.header.frame_id = "map";
@@ -268,13 +244,28 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     marker.color.b = 0.0;
     marker_pub_->publish(marker);
 
-    if (checkCollisionAtStart(start_state, "#37FF02")) 
+    // PoseWithCovarianceStamped to PoseStamped
+    start_pose_rtt.header.frame_id = "map";
+    start_pose_rtt.header.stamp = this->now();
+    start_pose_rtt.pose.position.x = start_state.x;
+    start_pose_rtt.pose.position.y = start_state.y;
+    start_pose_rtt.pose.position.z = 0.0;
+    start_pose_rtt.pose.orientation = tf2::toMsg(q);
+
+    // Check for collision at the start state
+    bool collision = checkCollisionAtStart(start_state,"#4BFF02");
+
+    if (collision) 
     {
         RCLCPP_INFO(this->get_logger(), "\033[1;31m----> Collision detected at start state.\033[0m");
     } 
     else 
     {
         RCLCPP_INFO(this->get_logger(), "\033[1;32m----> No collision detected at start state.\033[0m");
+    }
+
+    if (reference_rcv && collision) {
+        start_state_rcv = true;
     }
 
     RCLCPP_INFO(this->get_logger(), "Received initial state");
@@ -296,9 +287,6 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     m.getRPY(roll, pitch, yaw);
     end_state.z = yaw;
 
-    if (reference_rcv) {
-        end_state_rcv = true;
-    }
 
     // Create a marker for RViz
     visualization_msgs::msg::Marker marker;
@@ -321,7 +309,26 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     marker.color.b = 0.0;
     marker_pub_->publish(marker);
 
-    checkCollisionAtStart(end_state,"#FF3002");
+    // PoseStamped for RTT
+    goal_pose_rtt = *goal;
+
+
+    bool collision = checkCollisionAtStart(end_state,"#FF3002");
+
+    if (collision) 
+    {
+        RCLCPP_INFO(this->get_logger(), "\033[1;31m----> Collision detected at start state.\033[0m");
+    } 
+    else 
+    {
+        RCLCPP_INFO(this->get_logger(), "\033[1;32m----> No collision detected at start state.\033[0m");
+        handleRRTPathPlanning(start_pose_rtt, goal_pose_rtt); 
+
+    }
+
+    if (reference_rcv && collision) {
+        end_state_rcv = true;
+    }
 
     RCLCPP_INFO(this->get_logger(), "Received goal state");
 }
@@ -356,7 +363,7 @@ void planning_and_obstacle::processAndVisualize()
     if (reference_path.size() >= 2) {
         const auto &p1 = reference_path[reference_path.size() - 2];
         const auto &p2 = reference_path.back();
-        if (distance(p1, p2) <= 0.001) {
+        if (PathOptimizationNS::distance(p1, p2) <= 0.001) {
             reference_path.clear();
             reference_rcv = false;
         }
@@ -549,12 +556,60 @@ void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::Shar
     width = occ_map_data_.info.width;
     height = occ_map_data_.info.height;
 
-    // log the resolution, origin and size of the map
-    // RCLCPP_INFO(this->get_logger(), "Resolution: %f", resolution);
-    // RCLCPP_INFO(this->get_logger(), "Origin: (%f, %f)", originX, originY);
-    // RCLCPP_INFO(this->get_logger(), "Size: %d x %d", width, height);
-    // RCLCPP_INFO(this->get_logger(), "Occupancy grid map received");
+    rrt_planner_.initialize(originX, originY, resolution, width, height);
+    rrt_planner_.setOccupancyGrid(occ_map_data_);
+
+
 }
+
+int planning_and_obstacle::getGridValue(double x, double y)
+{
+    int idx = static_cast<int>( floor( (y-originY)/resolution ) * width + floor( (x-originX)/resolution ) );
+    if(idx >= occ_map_data_.data.size())  // out of range --> unknown
+        return -1;  
+    return occ_map_data_.data[idx];
+}
+
+
+// ============================
+//  Algorithm RRT
+// ============================
+
+void planning_and_obstacle::handleRRTPathPlanning(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal) {
+    std::vector<geometry_msgs::msg::PoseStamped> path;
+
+    // Call RRT planner's makePlan method
+    if (rrt_planner_.makePlan(start, goal, path)) {
+        RCLCPP_INFO(this->get_logger(), "RRT Path Planning succeeded.");
+    } else {
+        RCLCPP_INFO(this->get_logger(), "RRT Path Planning failed.");
+    }
+
+    // Visualize the path
+    visualizePath(path);
+}
+
+void planning_and_obstacle::visualizePath(const std::vector<geometry_msgs::msg::PoseStamped> &path) {
+    visualization_msgs::msg::Marker path_marker;
+    path_marker.header.frame_id = "map";
+    path_marker.header.stamp = this->now();
+    path_marker.ns = "planned_path";
+    path_marker.action = visualization_msgs::msg::Marker::ADD;
+    path_marker.id = 2;
+    path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    path_marker.scale.x = 0.05;
+    path_marker.color.r = 0.0;
+    path_marker.color.g = 1.0;
+    path_marker.color.b = 0.0;
+    path_marker.color.a = 1.0;
+
+    for (const auto &pose : path) {
+        path_marker.points.push_back(pose.pose.position);
+    }
+
+    marker_pub_->publish(path_marker);
+}
+
 
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);

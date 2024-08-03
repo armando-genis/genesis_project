@@ -17,22 +17,14 @@
 #include "sat_collision_checker.h" // Ensure this include is correct
 #include "rrt_planner.h" // Include RRT Planner
 #include "PathOptimizationNS.h" // Include PathOptimizationNS
-#include "HeuristicsController.h" // Include HeuristicsController
+#include "CarData.h"
 
 
 class planning_and_obstacle : public rclcpp::Node
 {
 private:
-    // Collision checker
-    fop::SATCollisionChecker collision_checker; 
-    bool collision_detected = false;
-    std::vector<bool> collision_vector;
-    // Vehicle parameters
-    static constexpr double car_width = 2.0;
-    static constexpr double car_length = 4.0;
-    static constexpr double rtc = 1.5;
-    static constexpr double rear_d = car_length / 2 - rtc;
-    static constexpr double front_d = car_length - rear_d;
+
+    CarData car_data_;
 
     // Occupancy Grid Map
     nav_msgs::msg::OccupancyGrid occ_map_data_;
@@ -55,8 +47,6 @@ private:
     std::vector<PathOptimizationNS::State> reference_path;
     bool start_state_rcv = false, end_state_rcv = false, reference_rcv = false;
 
-    // Heuristics Controller
-    std::unique_ptr<HeuristicsController> heuristics_controller_;
 
     // Publishers
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
@@ -77,20 +67,32 @@ private:
     void goalCb(const geometry_msgs::msg::PoseStamped::SharedPtr goal);
     void processAndVisualize();
     void gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-    bool checkCollisionAtStart(const PathOptimizationNS::State state, const std::string& hex_color );
-    geometry_msgs::msg::Polygon createObstaclePolygon(double x, double y);
     int getGridValue(double x, double y);
     void handleRRTPathPlanning(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal);
     void visualizePath(const std::vector<geometry_msgs::msg::PoseStamped> &path);
 
+
+    bool checkCollisionAtStart(const PathOptimizationNS::State &state)
+    {
+        return car_data_.checkCollisionAtStart(state, occ_map_data_, resolution, originX, originY, width, height);
+    }
+
+
+    void publishVehiclePolygonMarker(const std::string &hex_color)
+    {
+        auto polygon_marker = car_data_.createVehiclePolygonMarker(hex_color, this->now());
+        polygon_pub_->publish(polygon_marker);
+    }
 
 public:
     planning_and_obstacle();
     ~planning_and_obstacle();
 };
 
-planning_and_obstacle::planning_and_obstacle() : Node("optimal_planner_node")
+planning_and_obstacle::planning_and_obstacle() : Node("optimal_planner_node"), 
+    car_data_(2.0, 4.0, 1.5) // Initialize CarData object with custom parameters
 {
+
     // Initialize publisher
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("vehicle_markers", 10);
     polygon_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("vehicle_polygon", 10);
@@ -112,23 +114,7 @@ planning_and_obstacle::planning_and_obstacle() : Node("optimal_planner_node")
         std::bind(&planning_and_obstacle::processAndVisualize, this)
     );
 
-    // add the vehicle geometry to the vehicle_geometry polygon
-    geometry_msgs::msg::Point32 p1, p2, p3, p4;
-    p1.x = front_d;
-    p1.y = car_width / 2;
-    p2.x = front_d;
-    p2.y = -car_width / 2;
-    p3.x = -rear_d;
-    p3.y = -car_width / 2;
-    p4.x = -rear_d;
-    p4.y = car_width / 2;
-
-    vehicle_geometry.points.push_back(p1);
-    vehicle_geometry.points.push_back(p2);
-    vehicle_geometry.points.push_back(p3);
-    vehicle_geometry.points.push_back(p4);
-
-    vehicle_geometry.points.push_back(vehicle_geometry.points.front());
+    vehicle_geometry = car_data_.getVehicleGeometry();
 
     RCLCPP_INFO(this->get_logger(), "\033[1;32m----> optimal_planner_node initialized.\033[0m");
 }
@@ -154,14 +140,14 @@ void planning_and_obstacle::visualize_vehicle_geometry(const std::vector<PathOpt
     for (const auto &state : result_path) {
         double heading = state.z;
         PathOptimizationNS::State p1, p2, p3, p4;
-        p1.x = front_d;
-        p1.y = car_width / 2;
-        p2.x = front_d;
-        p2.y = -car_width / 2;
-        p3.x = -rear_d;
-        p3.y = -car_width / 2;
-        p4.x = -rear_d;
-        p4.y = car_width / 2;
+        p1.x = car_data_.getFrontD();
+        p1.y = car_data_.getCarWidth() / 2;
+        p2.x = car_data_.getFrontD();
+        p2.y = -car_data_.getCarWidth() / 2;
+        p3.x = -car_data_.getRearD();
+        p3.y = -car_data_.getCarWidth() / 2;
+        p4.x = -car_data_.getRearD();
+        p4.y = car_data_.getCarWidth() / 2;
 
         auto tmp_relto = state;
         tmp_relto.z = heading;
@@ -257,7 +243,7 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     start_pose_rtt.pose.orientation = tf2::toMsg(q);
 
     // Check for collision at the start state
-    bool collision = checkCollisionAtStart(start_state,"#4BFF02");
+    bool collision = checkCollisionAtStart(start_state);
 
     if (collision) 
     {
@@ -271,6 +257,8 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     if (reference_rcv && collision) {
         start_state_rcv = true;
     }
+
+    publishVehiclePolygonMarker("#4BFF02");
 
     RCLCPP_INFO(this->get_logger(), "Received initial state");
 }
@@ -317,7 +305,7 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     goal_pose_rtt = *goal;
 
 
-    bool collision = checkCollisionAtStart(end_state,"#FF3002");
+    bool collision = checkCollisionAtStart(end_state);
 
     if (collision) 
     {
@@ -333,6 +321,8 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     if (reference_rcv && collision) {
         end_state_rcv = true;
     }
+
+    publishVehiclePolygonMarker("#FF3002");
 
     RCLCPP_INFO(this->get_logger(), "Received goal state");
 }
@@ -423,133 +413,6 @@ void planning_and_obstacle::processAndVisualize()
 
 }
 
-bool planning_and_obstacle::checkCollisionAtStart(const PathOptimizationNS::State state, const std::string& hex_color)
-{
-
-    // Define the 5 meter offset
-    double offset = 5.0;
-
-    // Define the bounds for the region to check
-    double min_x = std::max(originX, state.x - offset);
-    double max_x = std::min(originX + width * resolution, state.x + offset);
-    double min_y = std::max(originY, state.y - offset);
-    double max_y = std::min(originY + height * resolution, state.y + offset);
-
-    // Convert bounds to grid indices
-    uint32_t min_i = std::max(0, static_cast<int>((min_y - originY) / resolution));
-    uint32_t max_i = std::min(static_cast<int>(height) - 1, static_cast<int>((max_y - originY) / resolution));
-    uint32_t min_j = std::max(0, static_cast<int>((min_x - originX) / resolution));
-    uint32_t max_j = std::min(static_cast<int>(width) - 1, static_cast<int>((max_x - originX) / resolution));
-
-    // Convert hex color to RGBA
-    if (hex_color.size() != 7 || hex_color[0] != '#') {
-        throw std::invalid_argument("Hex color must be in the format #RRGGBB");
-    }
-
-    unsigned int hex_value;
-    std::stringstream ss;
-    ss << std::hex << hex_color.substr(1);
-    ss >> hex_value;
-
-    float r = ((hex_value >> 16) & 0xFF) / 255.0f;
-    float g = ((hex_value >> 8) & 0xFF) / 255.0f;
-    float b = (hex_value & 0xFF) / 255.0f;
-    float a = 1.0f; // Assuming full opacity if alpha is not specified
-
-    // log the hex color and the RGBA values
-    RCLCPP_INFO(this->get_logger(), "Hex color: %s", hex_color.c_str());
-    RCLCPP_INFO(this->get_logger(), "RGBA: %f, %f, %f, %f", r, g, b, a);
-
-    // Publish the vehicle geometry as a polygon
-    visualization_msgs::msg::Marker polygon_marker;
-    polygon_marker.header.frame_id = "map";
-    polygon_marker.header.stamp = this->now();
-    polygon_marker.ns = "vehicle_polygon";
-    polygon_marker.action = visualization_msgs::msg::Marker::ADD;
-    polygon_marker.id = 10;
-    polygon_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    polygon_marker.scale.x = 0.05;
-    polygon_marker.color.r = r;
-    polygon_marker.color.g = g;
-    polygon_marker.color.b = b;
-    polygon_marker.color.a = a;
-
-    // Create the vehicle polygon at the start state position
-    geometry_msgs::msg::Polygon vehicle_poly;
-    for (const auto& point : vehicle_geometry.points) {
-        geometry_msgs::msg::Point32 p_point32;
-        geometry_msgs::msg::Point p_point;
-
-        double x = state.x + point.x * cos(state.z) - point.y * sin(state.z);
-        double y = state.y + point.x * sin(state.z) + point.y * cos(state.z);
-
-        p_point32.x = x;
-        p_point32.y = y;
-        p_point.x = x;
-        p_point.y = y;
-
-        polygon_marker.points.push_back(p_point);
-        vehicle_poly.points.push_back(p_point32);
-    }
-
-    polygon_pub_->publish(polygon_marker);
-
-    // for (uint32_t i = 0; i < height; ++i) {
-    //     for (uint32_t j = 0; j < width; ++j) {
-    //         double x = originX + j * resolution;
-    //         double y = originY + i * resolution;
-    //         if (x >= min_x && x <= max_x && y >= min_y && y <= max_y) {
-    //             if (occ_map_data_.data[i * width + j] > 0) {
-    //                 auto obstacle_poly = createObstaclePolygon(x, y);
-    //                 if (collision_checker.check_collision(vehicle_poly, obstacle_poly)) {
-    //                     return true; // Collision detected
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    // return false;
-
-    // Check each relevant cell in the occupancy grid
-    for (uint32_t i = min_i; i <= max_i; ++i) {
-        for (uint32_t j = min_j; j <= max_j; ++j) {
-            if (occ_map_data_.data[i * width + j] > 0) {
-                double x = originX + j * resolution;
-                double y = originY + i * resolution;
-                auto obstacle_poly = createObstaclePolygon(x, y);
-
-                if (collision_checker.check_collision(vehicle_poly, obstacle_poly)) {
-                    return true; // Collision detected
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-geometry_msgs::msg::Polygon planning_and_obstacle::createObstaclePolygon(double x, double y) {
-    geometry_msgs::msg::Polygon obstacle_poly;
-    double half_res = resolution / 2.0;
-
-    geometry_msgs::msg::Point32 p1, p2, p3, p4;
-    p1.x = x - half_res;
-    p1.y = y - half_res;
-    p2.x = x + half_res;
-    p2.y = y - half_res;
-    p3.x = x + half_res;
-    p3.y = y + half_res;
-    p4.x = x - half_res;
-    p4.y = y + half_res;
-
-    obstacle_poly.points.push_back(p1);
-    obstacle_poly.points.push_back(p2);
-    obstacle_poly.points.push_back(p3);
-    obstacle_poly.points.push_back(p4);
-    obstacle_poly.points.push_back(p1); // Close the polygon
-
-    return obstacle_poly;
-}
 
 void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
@@ -563,19 +426,7 @@ void planning_and_obstacle::gridMapdata(const nav_msgs::msg::OccupancyGrid::Shar
     rrt_planner_.initialize(originX, originY, resolution, width, height);
     rrt_planner_.setOccupancyGrid(occ_map_data_);
 
-    heuristics_controller_ = std::make_unique<HeuristicsController>(resolution, originX, originY, width, height, occ_map_data_.data);
 
-    PathOptimizationNS::State targetCellPos; // Define the target state as needed
-    heuristics_controller_->EuclideanDistance(targetCellPos);
-    heuristics_controller_->DynamicProgramming(targetCellPos);
-    heuristics_controller_->GenerateFinalHeuristics(occ_map_data_.data);
-
-
-    // log the resolution, origin and size of the map
-    // RCLCPP_INFO(this->get_logger(), "Resolution: %f", resolution);
-    // RCLCPP_INFO(this->get_logger(), "Origin: (%f, %f)", originX, originY);
-    // RCLCPP_INFO(this->get_logger(), "Size: %d x %d", width, height);
-    // RCLCPP_INFO(this->get_logger(), "Occupancy grid map received");
 }
 
 int planning_and_obstacle::getGridValue(double x, double y)
