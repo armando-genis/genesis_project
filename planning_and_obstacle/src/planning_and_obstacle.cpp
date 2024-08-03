@@ -199,6 +199,8 @@ void planning_and_obstacle::referenceCb(const geometry_msgs::msg::PointStamped::
 
 void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr start)
 {
+    RCLCPP_INFO(this->get_logger(), "Received initial state");
+
     start_state.x = start->pose.pose.position.x;
     start_state.y = start->pose.pose.position.y;
 
@@ -244,6 +246,8 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
 
     // Check for collision at the start state
     bool collision = checkCollisionAtStart(start_state);
+    publishVehiclePolygonMarker("#4BFF02");
+
 
     if (collision) 
     {
@@ -258,13 +262,14 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
         start_state_rcv = true;
     }
 
-    publishVehiclePolygonMarker("#4BFF02");
 
-    RCLCPP_INFO(this->get_logger(), "Received initial state");
 }
 
 void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::SharedPtr goal)
 {
+
+    RCLCPP_INFO(this->get_logger(), "Received goal state");
+
     end_state.x = goal->pose.position.x;
     end_state.y = goal->pose.position.y;
 
@@ -305,7 +310,9 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     goal_pose_rtt = *goal;
 
 
+
     bool collision = checkCollisionAtStart(end_state);
+    publishVehiclePolygonMarker("#FF3002");
 
     if (collision) 
     {
@@ -322,9 +329,6 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
         end_state_rcv = true;
     }
 
-    publishVehiclePolygonMarker("#FF3002");
-
-    RCLCPP_INFO(this->get_logger(), "Received goal state");
 }
 
 void planning_and_obstacle::processAndVisualize()

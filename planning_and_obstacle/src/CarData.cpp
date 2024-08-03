@@ -23,6 +23,7 @@ bool CarData::checkCollisionAtStart(const PathOptimizationNS::State state, const
     uint32_t min_j = std::max(0, static_cast<int>((min_x - originX) / resolution));
     uint32_t max_j = std::min(static_cast<int>(width) - 1, static_cast<int>((max_x - originX) / resolution));
 
+    geometry_msgs::msg::Polygon vehicle_poly;
 
     for (const auto &point : vehicle_geometry.points) {
         geometry_msgs::msg::Point32 p_point32;
@@ -33,11 +34,10 @@ bool CarData::checkCollisionAtStart(const PathOptimizationNS::State state, const
         p_point32.x = x;
         p_point32.y = y;
 
-        vehicle_poly_rotated.points.push_back(p_point32);
+        vehicle_poly.points.push_back(p_point32);
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Number of points in the polygon: %d", vehicle_geometry.points.size());
-
+    vehicle_poly_rotated = vehicle_poly;
 
     // Check each relevant cell in the occupancy grid
     for (uint32_t i = min_i; i <= max_i; ++i) {
@@ -47,7 +47,7 @@ bool CarData::checkCollisionAtStart(const PathOptimizationNS::State state, const
                 double y = originY + i * resolution;
                 auto obstacle_poly = createObstaclePolygon(x, y, resolution);
 
-                if (collision_checker.check_collision(vehicle_poly_rotated, obstacle_poly)) {
+                if (collision_checker.check_collision(vehicle_poly, obstacle_poly)) {
                     return true; // Collision detected
                 }
             }
@@ -137,9 +137,7 @@ visualization_msgs::msg::Marker CarData::createVehiclePolygonMarker(const std::s
         polygon_marker.points.push_back(p_point);
     }
 
-    // clear the rotated polygon
-    
-
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Number of points in the polygon: %d", vehicle_geometry.points.size());
 
     return polygon_marker;
 }
