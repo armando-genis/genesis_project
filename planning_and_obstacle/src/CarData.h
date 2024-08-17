@@ -46,6 +46,7 @@ public:
     double getRtc() const { return rtc; }
     double getRearD() const { return rear_d; }
     double getFrontD() const { return front_d; }
+    double getWheelBase() const { return rear_d + front_d; }
     geometry_msgs::msg::Polygon getVehicleGeometry() const { return vehicle_geometry; }
 };
 

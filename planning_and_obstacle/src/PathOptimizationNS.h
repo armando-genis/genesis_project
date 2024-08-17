@@ -7,8 +7,8 @@ namespace PathOptimizationNS {
 
 struct State {
     State() = default;
-    State(double x, double y, double z = 0, double k = 0, double s = 0, double v = 0, double a = 0) :
-        x(x), y(y), z(z), k(k), s(s), v(v), a(a) {}
+    State(double x, double y, double z = 0, double k = 0, double s = 0, double v = 0, double a = 0, double heading_degrees_nom = 0) :
+        x(x), y(y), z(z), k(k), s(s), v(v), a(a), heading_degrees_nom(heading_degrees_nom) {}
 
     double x{};
     double y{};
@@ -17,6 +17,7 @@ struct State {
     double s{};
     double v{};
     double a{};
+    double heading_degrees_nom{};
 };
 
 inline State local2Global(const State& reference, const State& target) {

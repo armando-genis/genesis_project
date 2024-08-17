@@ -137,7 +137,5 @@ visualization_msgs::msg::Marker CarData::createVehiclePolygonMarker(const std::s
         polygon_marker.points.push_back(p_point);
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Number of points in the polygon: %d", vehicle_geometry.points.size());
-
     return polygon_marker;
 }

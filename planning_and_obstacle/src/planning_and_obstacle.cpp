@@ -18,6 +18,7 @@
 #include "rrt_planner.h" // Include RRT Planner
 #include "PathOptimizationNS.h" // Include PathOptimizationNS
 #include "CarData.h"
+#include "reeds_shepp.h"
 
 
 class planning_and_obstacle : public rclcpp::Node
@@ -51,6 +52,9 @@ private:
     // Publishers
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr polygon_pub_;
+    // Publisher for the Reeds-Shepp path
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr reeds_shepp_path_pub_;
+
 
     // Subscribers
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr reference_sub_;
@@ -70,6 +74,9 @@ private:
     int getGridValue(double x, double y);
     void handleRRTPathPlanning(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal);
     void visualizePath(const std::vector<geometry_msgs::msg::PoseStamped> &path);
+    double normalizeAngle(double angle_rad);
+    double radiansToDegrees(double angle_rad);
+    double normalizeDegrees(double angle_deg);
 
 
     bool checkCollisionAtStart(const PathOptimizationNS::State &state)
@@ -96,6 +103,8 @@ planning_and_obstacle::planning_and_obstacle() : Node("optimal_planner_node"),
     // Initialize publisher
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("vehicle_markers", 10);
     polygon_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("vehicle_polygon", 10);
+   // Initialize the new publisher for Reeds-Shepp path
+    reeds_shepp_path_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("reeds_shepp_path", 10);
 
     // Initialize subscribers
     reference_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
@@ -214,6 +223,22 @@ void planning_and_obstacle::startCb(const geometry_msgs::msg::PoseWithCovariance
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
     start_state.z = yaw;
+    
+    // double theta = normalizeAngle(yaw);
+
+    double theta_deg = radiansToDegrees(yaw);
+    double normalized_angle = normalizeDegrees(theta_deg);
+
+    start_state.heading_degrees_nom = normalized_angle;
+
+    // // log the start state z value in green 
+    // RCLCPP_INFO(this->get_logger(), "\033[1;32mStart state z: %f\033[0m", start_state.z);
+    // // log the start state theta value in grren
+    // RCLCPP_INFO(this->get_logger(), "\033[1;32mStart state Normalize theta: %f\033[0m", theta);
+    // // log the start state theta in degrees in green
+    // RCLCPP_INFO(this->get_logger(), "\033[1;32mStart state theta (degrees): %f\033[0m", theta_deg);
+    // // log the start state theta in degrees normalized in green
+    // RCLCPP_INFO(this->get_logger(), "\033[1;32mStart state theta (degrees) normalized: %f\033[0m", normalized_angle);
 
     // Create a marker for RViz
     visualization_msgs::msg::Marker marker;
@@ -284,6 +309,10 @@ void planning_and_obstacle::goalCb(const geometry_msgs::msg::PoseStamped::Shared
     m.getRPY(roll, pitch, yaw);
     end_state.z = yaw;
 
+    double theta_deg = radiansToDegrees(yaw);
+    double normalized_angle = normalizeDegrees(theta_deg); 
+
+    end_state.heading_degrees_nom = normalized_angle;
 
     // Create a marker for RViz
     visualization_msgs::msg::Marker marker;
@@ -442,12 +471,21 @@ int planning_and_obstacle::getGridValue(double x, double y)
 }
 
 
-// ============================
+// =========================== =
 //  Algorithm RRT
 // ============================
 
 void planning_and_obstacle::handleRRTPathPlanning(const geometry_msgs::msg::PoseStamped &start, const geometry_msgs::msg::PoseStamped &goal) {
     std::vector<geometry_msgs::msg::PoseStamped> path;
+
+
+    // Reed sheep path
+    // Convert start and end states to tuples (x, y, theta)
+    std::tuple<double, double, double> start_sheep = {start_state.x, start_state.y, start_state.heading_degrees_nom};
+    std::tuple<double, double, double> end_sheep = {end_state.x, end_state.y, end_state.heading_degrees_nom};
+
+    // Get the Reeds-Shepp optimal path
+    Path reeds_shepp_path = ReedsShepp::get_optimal_path(start_sheep, end_sheep);
 
     // Call RRT planner's makePlan method
     if (rrt_planner_.makePlan(start, goal, path)) {
@@ -479,6 +517,34 @@ void planning_and_obstacle::visualizePath(const std::vector<geometry_msgs::msg::
     }
 
     marker_pub_->publish(path_marker);
+}
+
+
+double planning_and_obstacle::normalizeAngle(double angle_rad) {
+    while (angle_rad < -M_PI) {
+        angle_rad += 2.0 * M_PI;
+    }
+    while (angle_rad >= M_PI) {
+        angle_rad -= 2.0 * M_PI;
+    }
+    return angle_rad;
+}
+
+double planning_and_obstacle::radiansToDegrees(double angle_rad) {
+    return angle_rad * 180.0 / M_PI;
+}
+
+
+double planning_and_obstacle::normalizeDegrees(double angle_deg) {
+    // Use the fmod function to handle angles greater than 360 or less than 0
+    angle_deg = fmod(angle_deg, 360.0);
+    
+    // If the result is negative, adjust it to the range [0, 360)
+    if (angle_deg < 0) {
+        angle_deg += 360.0;
+    }
+    
+    return angle_deg;
 }
 
 

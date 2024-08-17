@@ -34,7 +34,7 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-add_executable(optimal_planner_node src/planning_and_obstacle.cpp src/CubicSpline1D.cpp src/sat_collision_checker.cc src/rrt_planner.cpp src/CarData.cpp)
+add_executable(optimal_planner_node src/planning_and_obstacle.cpp src/CubicSpline1D.cpp src/sat_collision_checker.cc src/rrt_planner.cpp src/CarData.cpp src/reeds_shepp.cpp)
 
 ament_target_dependencies(optimal_planner_node rclcpp std_msgs geometry_msgs visualization_msgs tf2 tf2_geometry_msgs nav_msgs)
 target_link_libraries(optimal_planner_node Eigen3::Eigen)
